@@ -8,11 +8,11 @@ from metpy.units import units
 from osgeo import gdal
 
 
-def saveimg(image_georef, img_new, outputPath, epsg):
+def saveimg(image_georef, img_new, outputPath, epsg = 'EPSG:32632'):
     """ Save created image in chosen format to chosen path.
 
     Args:
-        image_georef (numpy.array): sample georeferenced image with parameters to be copied to new image
+        image_georef (string):      path to sample georeferenced image with parameters to be copied to new image
         img_new (numpy.array):      newly created image to be saved
         outputPath (str):           path including new file name to location for saving
         epsg (str):                 EPSG code for SRS (e.g. 'EPSG:32632')
@@ -340,35 +340,120 @@ def zdh0(zd0, z0m):
     return zdh
 
 def PSI_m_stable(coeff_a, coeff_b, coeff_c, coeff_d, u_planet, MoninObuk_L):
+    """_summary_                            ?????????????????????
+ 
+    Args:
+        coeff_a (_type_): _description_
+        coeff_b (_type_): _description_
+        coeff_c (_type_): _description_
+        coeff_d (_type_): _description_
+        u_planet (_type_): _description_
+        MoninObuk_L (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """    
     coeff_dzeta = u_planet / MoninObuk_L
     psi_m_stab = -(coeff_a * coeff_dzeta + coeff_b * (coeff_dzeta - coeff_c / coeff_d) \
                    * np.exp((-coeff_d) * coeff_dzeta) + coeff_b * coeff_c / coeff_d)
     return psi_m_stab
 
 def PSI_h_stable(coeff_a, coeff_b, coeff_c, coeff_d, u_planet, MoninObuk_L):
+    """_summary_                        ????????????????????????????????????
+
+    Args:
+        coeff_a (_type_): _description_
+        coeff_b (_type_): _description_
+        coeff_c (_type_): _description_
+        coeff_d (_type_): _description_
+        u_planet (_type_): _description_
+        MoninObuk_L (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """    
     coeff_dzeta = u_planet / MoninObuk_L   
     psi_h_stab = -((1 + 2 * coeff_a * coeff_dzeta / 3) ** 1.5 + coeff_b * (coeff_dzeta - coeff_c / coeff_d) \
                    * np.exp((-coeff_d) * coeff_dzeta)+ (coeff_b * coeff_c/coeff_d - 1))
 
     return psi_h_stab
 
+def airResis(Z, zero_d, z0m, psi_m_stable, z_pbl, psi_h_stable, k, wind_sp):
+    ra = (np.log((Z - zero_d) / z0m) - psi_m_stable) * (np.log((z_pbl - zero_d)/(0.1 * z0m)) - psi_h_stable) / (k ** 2 * wind_sp) # s/m
+    return ra
+
 def H(Rn, airdensity, rew, vappress, satvappress, slopevappress, gamma_cons):
+    """ Sensible Heat Flux Aerodynamic Method [W/m2]
+
+    Args:
+        Rn (numpy.array):       Net Solar Radiation [W/m2]
+        airdensity (float):     Density of Air [kg/m3]
+        rew (_type_): _description_             ???????????????????????????
+        vappress (float):       Water Vapour Pressure [kPa]
+        satvappress (float):    Saturated Water Vapour Pressure [kPa]
+        slopevappress (float):  Slope Vapour Pressure [kPa]
+        gamma_cons (float):     Psychrometric Constant [kPa/°C]
+
+    Returns:
+        numpy.array: Sensible Heat Flux Aerodynamic Method [W/m2]
+    """    
     H0 = (Rn - (airdensity / rew) * ((vappress - satvappress) / gamma_cons)) / (1.0 + slopevappress / gamma_cons)
     return H0
 
 def LatentH(delta, Rn, G, airdensity, Cp, satvappress, water_vapour, airresis,  gamma_cons):
+    """ Latent Heat Flux Aerodynamic Method [W/m2]
+
+    Args:
+        delta (numpy.array):    Slope of water vapour pressure gradient to temperature gradient [kPa/K]
+        Rn (numpy.array):       Net Solar Radiation [W/m2]
+        G (numpy.array):        Ground Heat Flux [W/ms]
+        airdensity (float):     Density of Air [kg/m3]
+        Cp (float):             Specific heat at constant pressure. Defaults to 0.001013 [J kg-1 °C-1]
+        satvappress (float):    Saturated Water Vapour Pressure [kPa]
+        water_vapour (float):   Water Vapour Pressure [kPa]
+        airresis (numpy.array): Resistance of Air [s/m]
+        gamma_cons (float):     Psychrometric Constant [kPa/°C]
+
+    Returns:
+        numpy.array: Latent Heat Flux Aerodynamic Method [W/m2]
+    """    
     LHF = (delta * (Rn - G) + airdensity * Cp * (satvappress - water_vapour) / airresis) / (delta + gamma_cons)
     return LHF
 
 def ET_actual(Rn, G, H, l_lambda):
+    """ Actual EVapotranspiration [mm]
+
+    Args:
+        Rn (numpy.array):       Net Solar Radiation [W/m2]
+        G (numpy.array):        Ground Heat Flux [W/ms]
+        H (numpy.array):        Sensible Heat Flux [W/ms]
+        l_lambda (float):       Latent heat of vaporization. Defaults to 2.45 [MJ kg-1]
+    Returns:
+        numpy.array: Actual Evapotranspiration [mm]
+    """    
     ETA = (Rn - G - H) / l_lambda
     return ETA
 
 def ET_daily(ET_act, l_lambda):
+    """ Daily Evapotranspiration [mm/day]
+
+    Args:
+        ET_act (numpy.array): Actual Evapotranspiration [mm]
+        l_lambda (float):     Latent heat of vaporization. Defaults to 2.45 [MJ kg-1]
+
+    Returns:
+        numpy.array: Daily Evapotranspiration [mm/day]
+    """    
     ET_day = (ET_act / (l_lambda * 1000000)) * 0.3 * 86400 # daily ET
     return ET_day
 
 def delta_ea_T(lst_K, temperature):
+    """ Slope of water vapour pressure gradient to temperature gradient [kPa/K] based on Jackson etal. (1998).
+
+    Args:
+        lst_K (numpy.array): Land Surface Temperature [K]
+        temperature (float): Air Temperature [°C]
+    """    
     
     T = ((lst_K - 273.15) + temperature) / 2
     delta = (45.03 + 3.014 * T + 0.05345 * T ** 2 + 0.00224 * T ** 3) * 0.001
