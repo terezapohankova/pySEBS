@@ -1,26 +1,20 @@
-import math
+
 import os
 import sys
 from pprint import pprint
 
-import metpy
 import numpy as np
-#import sebs_function_bank as sfb
-import openpyxl as xl
 import pandas as pd
 import pint
 import rasterio as rio
 import scipy
-
+import scipy.constants
 from metpy.units import units
 from osgeo import gdal
 from rasterio.plot import show
-from scipy import ndimage
 
 from valencia_fcs import *
 
-ureg = pint.UnitRegistry()
-Q_ = ureg.Quantity
 
 #######################################################################################################
 #######################################################################################################
@@ -32,7 +26,7 @@ INPUT_FOLDER = r'/home/tereza/ownCloud/PhD/staze/valencia2023/work/SEBS/20180718
 OUTPUT_FOLDER = r'/home/tereza/ownCloud/PhD/staze/valencia2023/work/SEBS/20180718_1155_LST_EMISIVIDAD_ALBEDO_NDVI/TEST_OUTPUT/'
 FOLDER_METEO = r'/home/tereza/ownCloud/PhD/staze/valencia2023/work/SEBS/fluxes_Braccagni'
 
-
+## define input data names available in the INPUT FOLDER
 NDVI_name = '1155NDVI.gcu'
 LST_name = '1155LST.gcu'
 ALBEDO_name = '1155albedo.gcu'
@@ -40,25 +34,27 @@ LSE_name = '1155LSE.gcu'
 Rnet = '1155_Rnet.gcu'
 Fvc = 'fvc.gcu'
 
+## define input meteorological file names available in the FOLDER_METEO
 METEO = 'meteo_cornJUN_JUL1.xlsx'
 
 ## CONSTANTS
 epsg = 'EPSG:32632'
-B_constant = scipy.constants.sigma # W m^-2 K^-4
-Z = 10 # meter
-Z_m = 2 # m ; height of measurement
-R = 287.05 # J/kg-K, gas constant, https://designbuilder.co.uk/helpv3.4/Content/Calculation_of_Air_Density.htm
-Cp = 0.001013 # specific heat at constant pressure [MJ kg-1 °C-1]
-l_lambda =  2.45 #latent heat of vaporization [MJ kg-1]
-e =  0.622 #ratio molecular weight of water vapour/dry air 
-k = 0.41 # con karmann
-g = 9.81
-z_pbl = 1000 # m, height of planetary boundary layer
+B_constant = scipy.constants.sigma  # W m^-2 K^-4
+Z = 10                              # altitude [m]
+Z_m = 2                             # height of measurement above ground [m] 
+R = 287.05                          # gas constant, [J/kg-K], https://designbuilder.co.uk/helpv3.4/Content/Calculation_of_Air_Density.htm
+Cp = 0.001013                       # specific heat at constant pressure [MJ kg-1 °C-1]
+l_lambda =  2.45                    # latent heat of vaporization [MJ kg-1]
+e =  0.622                          # ratio molecular weight of water vapour/dry air 
+k = 0.41                            # von karmann
+g = 9.81                            # grativational constant
+z_pbl = 1000                        # height of planetary boundary layer [m]
 
-a = 1
-b = 0.667
-c = 5.0
-de = 0.35
+# PSI_ coeffs
+coeff_a = 1
+coeff_b = 0.667
+coeff_c = 5.0
+coeff_d = 0.35
 
 psy_c = 0.33
 psy_d = 0.057
@@ -108,7 +104,6 @@ pprint(f"Maximum dry bulb temperature Pressure: {tair_dry4_max} °C.")
 tair_dry4_min = meteo_df['Tair_dry4'].min()
 pprint(f"Minimum dry bulb temperature Pressure: {tair_dry4_min} °C.")
 
-#tair_dry4 = Q_(tair_dry4, "degC") # specify units
 
 # get W
 my_w_ref = meteo_df.iloc[13681,2] # m/s
@@ -117,12 +112,11 @@ pprint(f"Wind Speed: {my_w_ref} m/s.")
 # Pressure
 my_press_ref = 100858.1117 # Pa
 my_press_ref_kpa = my_press_ref / 1000
-#pprint(f"Surface Pressure: , {my_press_ref} Pa.")
+pprint(f"Surface Pressure: , {my_press_ref} Pa.")
 
 my_press_surf = meteo_df.iloc[13681,3] # kPa
 pprint(f"Surface Pressure: {my_press_surf} kPa.") # ???? UNITS
 
-#my_press_surf = Q_(my_press_surf, "kPa")
 press_surf_array = np.full_like(lst_b1, my_press_surf)
 
 # create array in shape of LST with values of Tair_wet4
@@ -195,47 +189,52 @@ pprint(f"Downwelling shortwave radiation: {my_SWin} W/m2.")
 my_LWin = meteo_df.iloc[13681,5] # Downwelling longwave radiation, W/m2
 pprint(f"Downwelling longwave radiation: {my_LWin} W/m2.")
 
+# shortwave net
 my_SWnet = SWnet(my_SWin, albedo_b1) # W/m2
 saveimg(os.path.join(INPUT_FOLDER, LST_name), my_SWnet, os.path.join(OUTPUT_FOLDER, 'my_SWnet_1155.GCU'), 'EPSG:32632')
+
+# longwave net
 my_LWnet = LWnet(lse_b1, my_LWin, B_constant, lst_b1) # W/m2
 saveimg(os.path.join(INPUT_FOLDER, LST_name), my_LWnet, os.path.join(OUTPUT_FOLDER, 'my_LWnet_1155.GCU'), 'EPSG:32632')
 
+#net radiation
 my_Rn = my_SWnet + my_LWnet # W/m2
 saveimg(os.path.join(INPUT_FOLDER, LST_name), my_Rn, os.path.join(OUTPUT_FOLDER, 'my_Rn_1155.GCU'), 'EPSG:32632')
 
+# ground heat flux
 my_G = G(my_Rn, my_fvc)
 saveimg(os.path.join(INPUT_FOLDER, LST_name), my_G, os.path.join(OUTPUT_FOLDER, 'my_G_1155.GCU'), 'EPSG:32632')
 
-zero_except = np.seterr(all = "ignore")
-
+# zero_plane displacement
 zero_d = d(my_hc) # m
 saveimg(os.path.join(INPUT_FOLDER, LST_name), zero_d, os.path.join(OUTPUT_FOLDER, 'd_1155.GCU'), 'EPSG:32632')
 
+#external friction 
 u_ = u_friction(my_w_ref, k, Z_m, zero_d, my_z0m) # m/s
 u_ = np.where(u_ < 0, np.mean(u_), u_ )
 saveimg(os.path.join(INPUT_FOLDER, LST_name), u_, os.path.join(OUTPUT_FOLDER, 'u_friction_1155.GCU'), 'EPSG:32632')
 
-u_planet = u_pbl(my_w_ref, 2, my_z0m, 1000, zero_d) # m/s
+# height of win speed boundary planet
+u_planet = windsp_pbl(my_w_ref, 2, my_z0m, 1000, zero_d) # m/s
 saveimg(os.path.join(INPUT_FOLDER, LST_name), u_planet, os.path.join(OUTPUT_FOLDER, 'u_planet_1155.GCU'), 'EPSG:32632')
-
+ 
+# ????????????????????????????
 zd0 = z_pbl - zero_d
 zdh = zdh0(zd0, my_z0m)
 zdm = np.log(zd0 / my_z0m)
-ku = 0.41 * u_planet
-RUstar = ku / zdm
+RUstar = (0.41 * u_planet) / zdm
 saveimg(os.path.join(INPUT_FOLDER, LST_name), RUstar, os.path.join(OUTPUT_FOLDER, 'RUstar_1155.GCU'), 'EPSG:32632')
 
+# MO length
 L_w = (RUstar ** 3.0) * air_density / (0.61 * k * g * (my_Rn - my_G) / 2450000)
 L_w = np.where(L_w > 3000, 3000, L_w)
 saveimg(os.path.join(INPUT_FOLDER, LST_name), L_w, os.path.join(OUTPUT_FOLDER, 'L_w2_1155.GCU'), 'EPSG:32632')
-#print(np.nanmin(RUstar))
 
-dzeta = u_planet / L_w
+#stability coeff ????
+psi_m_stab = PSI_m_stable(coeff_a, coeff_b, coeff_c, coeff_d, u_planet, L_w)
+psi_h_stab = PSI_h_stable(coeff_a, coeff_b, coeff_c, coeff_d, u_planet, L_w)
 
-
-psi_m_stab = -(a * dzeta + b * (dzeta - c / de) * np.exp((-de) * dzeta) + b * c / de)
-psi_h_stab = -((1 + 2 * a * dzeta / 3) ** 1.5 + b* (dzeta - c / de) * np.exp((-de) * dzeta)+ (b * c/de - 1))
-
+# air resistance
 ra = (np.log((Z - zero_d) / my_z0m) - psi_m_stab) * (np.log((z_pbl - zero_d)/(0.1*my_z0m)) - psi_h_stab) / (k ** 2 * my_w_ref) # s/m
 saveimg(os.path.join(INPUT_FOLDER, LST_name), ra, os.path.join(OUTPUT_FOLDER, 'ra_1155.GCU'), 'EPSG:32632')
 
@@ -260,19 +259,21 @@ re_w = (zdh - C_wet) / (k * RUstar)
 re_w1 = zdh / (k * RUstar)
 re_w2 = re_w
 rew = re_w1 + re_w2
-flux_H = (my_Rn - (air_density / rew) * ((water_vapour - sat_vap_press) / gamma_cons)) / (1.0 + slope_vap_press / gamma_cons)
+
+#sensible heat flux
+flux_H = H(my_Rn, air_density, rew, water_vapour, sat_vap_press, slope_vap_press, gamma_cons)
 saveimg(os.path.join(INPUT_FOLDER, LST_name), flux_H, os.path.join(OUTPUT_FOLDER, 'H_1155.GCU'), 'EPSG:32632')
 
-ET_Instant = my_Rn - flux_H - my_G
-saveimg(os.path.join(INPUT_FOLDER, LST_name), ET_Instant, os.path.join(OUTPUT_FOLDER, 'ET_1155.GCU'), 'EPSG:32632')
+# latent heat flux
+delta = delta_ea_T(lst_b1, my_t_ref)
+Latent = LatentH(delta, my_Rn, my_G, air_density, Cp, sat_vap_press, water_vapour, ra, gamma_cons)
+saveimg(os.path.join(INPUT_FOLDER, LST_name), Latent, os.path.join(OUTPUT_FOLDER, 'LE_1155.GCU'), 'EPSG:32632')
 
+# actual ET
+ET_act = ET_actual(my_Rn, my_G, my_hc, l_lambda)
+saveimg(os.path.join(INPUT_FOLDER, LST_name), ET_act, os.path.join(OUTPUT_FOLDER, 'ActualET_1155.GCU'), 'EPSG:32632')
 
-T = ((lst_b1 - 273.15) + my_t_ref) / 2
-delta = (45.03 + 3.014 * T + 0.05345 * T ** 2 + 0.00224 * T ** 3) * 0.001
-LE_p = (delta * (my_Rn - my_G) + air_density * Cp * (sat_vap_press - water_vapour) / ra) / (delta + gamma_cons) # latent heat flux
-saveimg(os.path.join(INPUT_FOLDER, LST_name), LE_p, os.path.join(OUTPUT_FOLDER, 'LE_1155.GCU'), 'EPSG:32632')
-
-ETR = (my_Rn - my_G - flux_H) / l_lambda # # Actual Evapotranspiration [mm/day]
-ETR = (ETR / (l_lambda * 1000000)) * 0.3 * 86400 # daily ET
-saveimg(os.path.join(INPUT_FOLDER, LST_name), ETR, os.path.join(OUTPUT_FOLDER, 'DailyET_1155.GCU'), 'EPSG:32632')
+# daily ET
+ET_day = ET_daily(ET_act, l_lambda)
+saveimg(os.path.join(INPUT_FOLDER, LST_name), ET_day, os.path.join(OUTPUT_FOLDER, 'DailyET_1155.GCU'), 'EPSG:32632')
 
