@@ -1,4 +1,4 @@
-# pySEBCS
+# pySEBS
 
 * Calculates Heat Fluxes, Actual and Daily Evapotranspiration based on SEBS model. 
 * Tested for Python 3.10.6.
